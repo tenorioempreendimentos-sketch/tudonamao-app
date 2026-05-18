@@ -1,0 +1,639 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
+import '../services/auth_service.dart';
+import '../services/sync_service.dart';
+import '../services/update_service.dart';
+import '../theme/app_theme.dart';
+import '../providers/theme_provider.dart';
+
+class SettingsScreen extends StatefulWidget {
+  const SettingsScreen({super.key});
+
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  String _versao = '';
+  String _build = '';
+  bool _verificandoUpdate = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _carregarVersao();
+  }
+
+  Future<void> _carregarVersao() async {
+    final info = await PackageInfo.fromPlatform();
+    if (mounted) {
+      setState(() {
+        _versao = info.version;
+        _build  = info.buildNumber;
+      });
+    }
+  }
+
+  Future<void> _verificarAtualizacao() async {
+    setState(() => _verificandoUpdate = true);
+    await UpdateService.checarAtualizacao(context, silencioso: false);
+    if (mounted) setState(() => _verificandoUpdate = false);
+  }
+
+  void _confirmarLogout() {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF0F2240),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text(
+          'Sair da conta?',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
+        ),
+        content: const Text(
+          'Seus dados salvos no dispositivo não serão apagados.',
+          style: TextStyle(color: Color(0xFF94a3b8), fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar',
+                style: TextStyle(color: Color(0xFF64748b))),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              final auth  = context.read<AuthService>();
+              final sync  = context.read<SyncService>();
+              await sync.limparFila();
+              await auth.logout();
+            },
+            child: const Text('Sair',
+                style: TextStyle(
+                    color: Colors.redAccent, fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final auth = context.watch<AuthService>();
+
+    return Scaffold(
+      backgroundColor: AppColors.primaryDark,
+      body: SafeArea(
+        child: Column(
+          children: [
+            _buildHeader(),
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // ── Dados da Conta ──────────────────────────────────
+                    _buildSection('Conta', [
+                      _buildAccountCard(auth),
+                    ]),
+
+                    const SizedBox(height: 20),
+
+                    // ── Aparência ────────────────────────────────────────
+                    _buildSection('Aparência', [
+                      _buildThemeToggle(context),
+                    ]),
+
+                    const SizedBox(height: 20),
+
+                    // ── App ─────────────────────────────────────────────
+                    _buildSection('Aplicativo', [
+                      _buildTile(
+                        icon: Icons.system_update_rounded,
+                        iconColor: const Color(0xFF22c55e),
+                        title: 'Buscar atualizações',
+                        subtitle: _versao.isEmpty
+                            ? 'Verificando versão...'
+                            : 'Versão instalada: v$_versao (build $_build)',
+                        trailing: _verificandoUpdate
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Color(0xFF22c55e),
+                                ),
+                              )
+                            : const Icon(Icons.chevron_right_rounded,
+                                color: Color(0xFF64748b)),
+                        onTap: _verificandoUpdate
+                            ? null
+                            : _verificarAtualizacao,
+                      ),
+                      _buildDivider(),
+                      _buildTile(
+                        icon: Icons.info_outline_rounded,
+                        iconColor: const Color(0xFF1E63B7),
+                        title: 'Sobre o TudoNaMão',
+                        subtitle: _versao.isEmpty
+                            ? ''
+                            : 'v$_versao · build $_build',
+                        trailing: const Icon(Icons.chevron_right_rounded,
+                            color: Color(0xFF64748b)),
+                        onTap: _mostrarSobre,
+                      ),
+                    ]),
+
+                    const SizedBox(height: 20),
+
+                    // ── Suporte ─────────────────────────────────────────
+                    _buildSection('Suporte', [
+                      _buildTile(
+                        icon: Icons.chat_rounded,
+                        iconColor: const Color(0xFF25d366),
+                        title: 'Suporte via WhatsApp',
+                        subtitle: 'Falar com a equipe TudoNaMão',
+                        trailing: const Icon(Icons.open_in_new_rounded,
+                            color: Color(0xFF64748b), size: 18),
+                        onTap: () => _abrirUrl(
+                            'https://wa.me/5521965918527?text=Olá,%20preciso%20de%20ajuda%20com%20o%20TudoNaMão'),
+                      ),
+                      _buildDivider(),
+                      _buildTile(
+                        icon: Icons.privacy_tip_outlined,
+                        iconColor: const Color(0xFF64748b),
+                        title: 'Política de Privacidade',
+                        subtitle: 'Como seus dados são protegidos',
+                        trailing: const Icon(Icons.open_in_new_rounded,
+                            color: Color(0xFF64748b), size: 18),
+                        onTap: () => _abrirUrl(
+                            'https://tudonamao-site-production.up.railway.app/privacidade.html'),
+                      ),
+                    ]),
+
+                    const SizedBox(height: 20),
+
+                    // ── Sair ─────────────────────────────────────────────
+                    _buildSection('Sessão', [
+                      _buildTile(
+                        icon: Icons.logout_rounded,
+                        iconColor: Colors.redAccent,
+                        title: 'Sair da conta',
+                        subtitle: auth.email,
+                        trailing: const Icon(Icons.chevron_right_rounded,
+                            color: Color(0xFF64748b)),
+                        onTap: _confirmarLogout,
+                        titleColor: Colors.redAccent,
+                      ),
+                    ]),
+
+                    const SizedBox(height: 32),
+
+                    // ── Rodapé ───────────────────────────────────────────
+                    Center(
+                      child: Text(
+                        'TudoNaMão v$_versao · Feito com ❤️ no Brasil',
+                        style: const TextStyle(
+                          color: Color(0xFF334155),
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Header ────────────────────────────────────────────────────────────────
+
+  Widget _buildHeader() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      decoration: BoxDecoration(
+        color: AppColors.primaryDark,
+        border: Border(
+          bottom: BorderSide(
+            color: Colors.white.withValues(alpha: 0.08),
+            width: 1,
+          ),
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.07),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(Icons.settings_rounded,
+                color: Colors.white, size: 20),
+          ),
+          const SizedBox(width: 14),
+          const Text(
+            'Configurações',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 20,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Card da conta ─────────────────────────────────────────────────────────
+
+  Widget _buildAccountCard(AuthService auth) {
+    final inicial = auth.nome.isNotEmpty ? auth.nome[0].toUpperCase() : 'U';
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      child: Row(
+        children: [
+          // Avatar
+          Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF1E63B7), Color(0xFF0B1F3A)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: Center(
+              child: Text(
+                inicial,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 24,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  auth.nome.isEmpty ? 'Usuário' : auth.nome,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  auth.email,
+                  style: const TextStyle(
+                    color: Color(0xFF64748b),
+                    fontSize: 13,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF22c55e).withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: const Color(0xFF22c55e).withValues(alpha: 0.3),
+                    ),
+                  ),
+                  child: const Text(
+                    '✓  Assinatura ativa',
+                    style: TextStyle(
+                      color: Color(0xFF22c55e),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // Copiar e-mail
+          IconButton(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: auth.email));
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('E-mail copiado'),
+                  duration: Duration(seconds: 1),
+                  behavior: SnackBarBehavior.floating,
+                ),
+              );
+            },
+            icon: const Icon(Icons.copy_rounded,
+                color: Color(0xFF64748b), size: 18),
+            tooltip: 'Copiar e-mail',
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Seção com título ──────────────────────────────────────────────────────
+
+  Widget _buildSection(String titulo, List<Widget> children) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(left: 4, bottom: 8),
+          child: Text(
+            titulo.toUpperCase(),
+            style: const TextStyle(
+              color: Color(0xFF64748b),
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1,
+            ),
+          ),
+        ),
+        Container(
+          decoration: BoxDecoration(
+            color: const Color(0xFF0F2240),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: 0.07),
+            ),
+          ),
+          child: Column(children: children),
+        ),
+      ],
+    );
+  }
+
+  // ── Tile padrão ───────────────────────────────────────────────────────────
+
+  Widget _buildTile({
+    required IconData icon,
+    required Color iconColor,
+    required String title,
+    required String subtitle,
+    required Widget trailing,
+    VoidCallback? onTap,
+    Color? titleColor,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          child: Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: iconColor.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(11),
+                ),
+                child: Icon(icon, color: iconColor, size: 20),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        color: titleColor ?? Colors.white,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    if (subtitle.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle,
+                        style: const TextStyle(
+                          color: Color(0xFF64748b),
+                          fontSize: 12,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              trailing,
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── Toggle de tema ────────────────────────────────────────────────────────
+
+  Widget _buildThemeToggle(BuildContext context) {
+    final themeProvider = context.watch<ThemeProvider>();
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      child: Row(
+        children: [
+          Container(
+            width: 38, height: 38,
+            decoration: BoxDecoration(
+              color: const Color(0xFF6366f1).withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(11),
+            ),
+            child: Icon(
+              themeProvider.isDark ? Icons.dark_mode_rounded : Icons.light_mode_rounded,
+              color: const Color(0xFF6366f1),
+              size: 20,
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  themeProvider.isDark ? 'Tema Escuro' : 'Tema Claro',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                Text(
+                  themeProvider.isDark
+                    ? 'Toque para alternar para claro'
+                    : 'Toque para alternar para escuro',
+                  style: const TextStyle(color: Color(0xFF64748b), fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          Switch(
+            value: themeProvider.isDark,
+            onChanged: (_) => themeProvider.toggleTheme(),
+            activeColor: const Color(0xFF6366f1),
+            activeTrackColor: const Color(0xFF6366f1).withValues(alpha: 0.3),
+            inactiveThumbColor: const Color(0xFFf59e0b),
+            inactiveTrackColor: const Color(0xFFf59e0b).withValues(alpha: 0.3),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDivider() {
+    return Divider(
+      height: 1,
+      thickness: 1,
+      color: Colors.white.withValues(alpha: 0.05),
+      indent: 68,
+      endIndent: 0,
+    );
+  }
+
+  // ── Dialog "Sobre" ────────────────────────────────────────────────────────
+
+  void _mostrarSobre() {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF0F2240),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 72,
+              height: 72,
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF1E63B7), Color(0xFF0B1F3A)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: const Center(
+                child: Text('T',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 36,
+                        fontWeight: FontWeight.w900)),
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'TudoNaMão',
+              style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w900),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'v$_versao (build $_build)',
+              style: const TextStyle(color: Color(0xFF64748b), fontSize: 13),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Organize sua vida toda em um único app.\nFeito com ❤️ no Brasil.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                  color: Color(0xFF94a3b8), fontSize: 13, height: 1.6),
+            ),
+            const SizedBox(height: 20),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.05),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Column(
+                children: [
+                  _AboutRow(label: 'Finanças', icon: '💰'),
+                  _AboutRow(label: 'Agenda', icon: '📅'),
+                  _AboutRow(label: 'Tarefas', icon: '✅'),
+                  _AboutRow(label: 'Compras', icon: '🛒'),
+                  _AboutRow(label: 'Cofre de Senhas', icon: '🔐'),
+                  _AboutRow(label: 'Assistente de IA', icon: '🤖'),
+                  _AboutRow(label: 'Assistente de Voz', icon: '🎙️'),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Fechar',
+                style: TextStyle(color: Color(0xFF1E63B7))),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _abrirUrl(String url) async {
+    final uri = Uri.parse(url);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Não foi possível abrir: $url'),
+            duration: const Duration(seconds: 3),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+}
+
+// ── Widget auxiliar para o dialog "Sobre" ────────────────────────────────────
+
+class _AboutRow extends StatelessWidget {
+  final String label;
+  final String icon;
+  const _AboutRow({required this.label, required this.icon});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Text(icon, style: const TextStyle(fontSize: 14)),
+          const SizedBox(width: 10),
+          Text(label,
+              style: const TextStyle(color: Color(0xFF94a3b8), fontSize: 13)),
+          const Spacer(),
+          const Icon(Icons.check_circle_rounded,
+              color: Color(0xFF22c55e), size: 14),
+        ],
+      ),
+    );
+  }
+}
