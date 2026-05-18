@@ -1,7 +1,7 @@
 name: tudonamao
 description: "Tudo na Maoo - Agenda, Finanças, Compras e muito mais"
 publish_to: 'none'
-version: 1.7.0+13
+version: 1.8.0+15
 
 environment:
   sdk: ^3.9.2
