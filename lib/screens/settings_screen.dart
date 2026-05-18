@@ -1,5 +1,7 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -149,6 +151,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ]),
 
                     const SizedBox(height: 20),
+
+                    const SizedBox(height: 20),
+
+                    // ── WhatsApp Bot ─────────────────────────────────────
+                    _buildSection('WhatsApp Bot', [
+                      _buildTile(
+                        icon: Icons.chat_bubble_rounded,
+                        iconColor: const Color(0xFF25d366),
+                        title: 'Vincular WhatsApp',
+                        subtitle: 'Registre gastos e compromissos pelo WhatsApp',
+                        trailing: const Icon(Icons.chevron_right_rounded,
+                            color: Color(0xFF64748b)),
+                        onTap: () => _abrirVincularWhatsApp(context),
+                      ),
+                    ]),
 
                     // ── Suporte ─────────────────────────────────────────
                     _buildSection('Suporte', [
@@ -590,6 +607,180 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 style: TextStyle(color: Color(0xFF1E63B7))),
           ),
         ],
+      ),
+    );
+  }
+
+  void _abrirVincularWhatsApp(BuildContext context) {
+    final ctrlTelefone = TextEditingController();
+    String? codigoGerado;
+    bool carregando = false;
+    final auth = context.read<AuthService>();
+    final apiBase = 'https://tudonamao-site-production.up.railway.app';
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF0F2240),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModal) => Padding(
+          padding: EdgeInsets.only(
+            left: 24, right: 24, top: 24,
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 32,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Handle
+              Center(
+                child: Container(
+                  width: 40, height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.white24,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              const Row(children: [
+                Icon(Icons.chat_bubble_rounded, color: Color(0xFF25d366), size: 28),
+                SizedBox(width: 12),
+                Text('Vincular WhatsApp',
+                    style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w800)),
+              ]),
+              const SizedBox(height: 8),
+              const Text(
+                'Depois de vincular, você pode enviar mensagens como:\n"comprei 25,00 de almoço" e o app registra automaticamente!',
+                style: TextStyle(color: Color(0xFF94a3b8), fontSize: 13, height: 1.5),
+              ),
+              const SizedBox(height: 24),
+
+              if (codigoGerado == null) ...[
+                // Passo 1: digitar telefone
+                const Text('Seu número de WhatsApp:',
+                    style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: ctrlTelefone,
+                  keyboardType: TextInputType.phone,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(
+                    hintText: '(11) 99999-9999',
+                    hintStyle: const TextStyle(color: Colors.white38),
+                    filled: true,
+                    fillColor: Colors.white10,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide.none,
+                    ),
+                    prefixText: '+55 ',
+                    prefixStyle: const TextStyle(color: Colors.white70),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF25d366),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    onPressed: carregando ? null : () async {
+                      setModal(() => carregando = true);
+                      try {
+                        final token = auth.token;
+                        final resp = await http.post(
+                          Uri.parse('$apiBase/api/whatsapp/vincular'),
+                          headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': 'Bearer $token',
+                          },
+                          body: jsonEncode({'telefone': ctrlTelefone.text}),
+                        );
+                        final data = jsonDecode(resp.body);
+                        if (data['success'] == true) {
+                          setModal(() { codigoGerado = data['codigo']; carregando = false; });
+                        } else {
+                          setModal(() => carregando = false);
+                          if (ctx.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                              content: Text(data['message'] ?? 'Erro ao gerar código'),
+                              backgroundColor: Colors.red,
+                              behavior: SnackBarBehavior.floating,
+                            ));
+                          }
+                        }
+                      } catch(e) {
+                        setModal(() => carregando = false);
+                      }
+                    },
+                    child: carregando
+                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                        : const Text('Gerar código', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+                  ),
+                ),
+              ] else ...[
+                // Passo 2: mostrar código e instrução
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF25d366).withValues(alpha: 0.1),
+                    border: Border.all(color: const Color(0xFF25d366).withValues(alpha: 0.3)),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Column(children: [
+                    const Text('Seu código de verificação:',
+                        style: TextStyle(color: Colors.white70, fontSize: 13)),
+                    const SizedBox(height: 8),
+                    Text(codigoGerado!,
+                        style: const TextStyle(color: Color(0xFF25d366), fontSize: 36,
+                            fontWeight: FontWeight.w900, letterSpacing: 8)),
+                    const SizedBox(height: 4),
+                    const Text('Válido por 15 minutos',
+                        style: TextStyle(color: Colors.white38, fontSize: 11)),
+                  ]),
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.05),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Próximo passo:', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13)),
+                      SizedBox(height: 8),
+                      Text('1. Abra o WhatsApp\n2. Envie o código acima para o número do bot\n3. Aguarde a confirmação\n\nApós confirmar, você pode registrar qualquer coisa diretamente pelo WhatsApp!',
+                          style: TextStyle(color: Color(0xFF94a3b8), fontSize: 13, height: 1.6)),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white70,
+                      side: const BorderSide(color: Colors.white24),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    onPressed: () => setModal(() => codigoGerado = null),
+                    child: const Text('Usar outro número'),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }
