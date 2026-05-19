@@ -614,7 +614,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void _abrirVincularWhatsApp(BuildContext context) {
     final ctrlTelefone = TextEditingController();
     String? codigoGerado;
-    String? numeroBot;
+    String? meuTelefone; // telefone do usuário com 55
     bool carregando = false;
     final auth = context.read<AuthService>();
     final apiBase = 'https://tudonamao-site-production.up.railway.app';
@@ -761,13 +761,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             'Content-Type': 'application/json',
                             'Authorization': 'Bearer $token',
                           },
-                          body: jsonEncode({'telefone': ctrlTelefone.text}),
+                          body: jsonEncode({
+                            // Garante envio com 55 + apenas dígitos
+                            'telefone': ctrlTelefone.text.replaceAll(RegExp(r'\D'), ''),
+                          }),
                         );
                         final data = jsonDecode(resp.body);
                         if (data['success'] == true) {
+                          // Salva o telefone do usuário (com 55) para usar no wa.me
+                          final tel = ctrlTelefone.text.replaceAll(RegExp(r'\D'), '');
                           setModal(() {
                             codigoGerado = data['codigo'].toString();
-                            numeroBot    = data['telefone_bot']?.toString() ?? botNumero;
+                            meuTelefone  = tel.startsWith('55') ? tel : '55$tel';
                             carregando   = false;
                           });
                         } else {
@@ -843,10 +848,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     label: const Text('Enviar código pelo WhatsApp',
                         style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
                     onPressed: () {
-                      final tel = numeroBot ?? botNumero;
-                      final msg = Uri.encodeComponent(
-                          'Meu código de verificação TudoNaMão: $codigoGerado');
-                      _abrirUrl('https://wa.me/$tel?text=$msg');
+                      // Abre o WhatsApp DO BOT com o código puro (só 6 dígitos)
+                      // O bot espera apenas o código numérico para verificar
+                      final msg = Uri.encodeComponent(codigoGerado ?? '');
+                      _abrirUrl('https://wa.me/$botNumero?text=$msg');
                     },
                   ),
                 ),
