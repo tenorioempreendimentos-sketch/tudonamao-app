@@ -20,9 +20,7 @@ class NotesProvider extends ChangeNotifier {
   }
 
   Future<void> init() async {
-    if (!Hive.isAdapterRegistered(8)) {
-      Hive.registerAdapter(NoteAdapter());
-    }
+    // Adapter já registrado no main() — não registrar de novo
     _box = await Hive.openBox<Note>(_boxName);
     notifyListeners();
   }
