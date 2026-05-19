@@ -41,12 +41,30 @@ import 'models/note.dart';
 import 'providers/notes_provider.dart';
 import 'widgets/voice_assistant_widget.dart';
 
+// ── Providers globais (criados antes do runApp) ───────────────────────────────
+late AuthService       _authService;
+late ApiService        _apiService;
+late SyncService       _syncService;
+late AgendaProvider    _agendaProvider;
+late FinanceProvider   _financeProvider;
+late BudgetProvider    _budgetProvider;
+late ShoppingProvider  _shoppingProvider;
+late UrgentTaskProvider _urgentTaskProvider;
+late PasswordProvider  _passwordProvider;
+late PetProvider       _petProvider;
+late ThemeProvider     _themeProvider;
+late NotesProvider     _notesProvider;
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await initializeDateFormatting('pt_BR', null);
-  await Hive.initFlutter();
 
-  // ── Registra adapters Hive ────────────────────────────────────────────────
+  // ── Inicialização mínima ANTES do runApp (só o essencial) ─────────────────
+  await Future.wait([
+    initializeDateFormatting('pt_BR', null),
+    Hive.initFlutter(),
+  ]);
+
+  // Registra adapters (síncrono — rápido)
   Hive.registerAdapter(AppointmentAdapter());
   Hive.registerAdapter(TransactionAdapter());
   Hive.registerAdapter(BudgetItemAdapter());
@@ -60,59 +78,150 @@ void main() async {
   Hive.registerAdapter(PetMedicamentoAdapter());
   Hive.registerAdapter(NoteAdapter());
 
-  // ── Serviços de auth e sync ───────────────────────────────────────────────
-  final authService = AuthService();
-  await authService.init();
+  // Cria providers (sem init ainda)
+  _authService        = AuthService();
+  _agendaProvider     = AgendaProvider();
+  _financeProvider    = FinanceProvider();
+  _budgetProvider     = BudgetProvider();
+  _shoppingProvider   = ShoppingProvider();
+  _urgentTaskProvider = UrgentTaskProvider();
+  _passwordProvider   = PasswordProvider();
+  _petProvider        = PetProvider();
+  _themeProvider      = ThemeProvider();
+  _notesProvider      = NotesProvider();
 
-  final apiService  = ApiService(authService);
-  final syncService = SyncService(apiService);
-  await syncService.init();
+  // runApp imediato — mostra splash Flutter enquanto inicializa
+  runApp(const _BootstrapApp());
+}
 
-  // ── Providers de dados ────────────────────────────────────────────────────
-  final agendaProvider      = AgendaProvider();
-  final financeProvider     = FinanceProvider();
-  final budgetProvider      = BudgetProvider();
-  final shoppingProvider    = ShoppingProvider();
-  final urgentTaskProvider  = UrgentTaskProvider();
-  final passwordProvider    = PasswordProvider();
-  final petProvider         = PetProvider();
-  final themeProvider        = ThemeProvider();
-  final notesProvider        = NotesProvider();
+// ── App de boot — inicializa tudo em paralelo e troca para o app real ─────────
+class _BootstrapApp extends StatefulWidget {
+  const _BootstrapApp();
+  @override
+  State<_BootstrapApp> createState() => _BootstrapAppState();
+}
 
-  await agendaProvider.init();
-  await financeProvider.init();
-  await budgetProvider.init();
-  await shoppingProvider.init();
-  await urgentTaskProvider.init();
-  await passwordProvider.init();
-  await petProvider.init();
-  await themeProvider.init();
-  await notesProvider.init();
+class _BootstrapAppState extends State<_BootstrapApp> {
+  bool _pronto = false;
 
-  // ── Injeta serviços nos providers ─────────────────────────────────────────
-  agendaProvider.setServices(apiService, syncService);
-  financeProvider.setServices(apiService, syncService);
-  shoppingProvider.setServices(apiService, syncService);
-  urgentTaskProvider.setServices(apiService, syncService);
+  @override
+  void initState() {
+    super.initState();
+    _inicializar();
+  }
 
-  runApp(
-    MultiProvider(
+  Future<void> _inicializar() async {
+    try {
+      // Auth primeiro (para saber se está logado)
+      await _authService.init();
+
+      // Cria dependências que precisam do auth
+      _apiService  = ApiService(_authService);
+      _syncService = SyncService(_apiService);
+
+      // Tudo em paralelo — abre todos os Hive boxes ao mesmo tempo
+      await Future.wait([
+        _syncService.init(),
+        _agendaProvider.init(),
+        _financeProvider.init(),
+        _budgetProvider.init(),
+        _shoppingProvider.init(),
+        _urgentTaskProvider.init(),
+        _passwordProvider.init(),
+        _petProvider.init(),
+        _themeProvider.init(),
+        _notesProvider.init(),
+      ]);
+
+      // Injeta serviços
+      _agendaProvider.setServices(_apiService, _syncService);
+      _financeProvider.setServices(_apiService, _syncService);
+      _shoppingProvider.setServices(_apiService, _syncService);
+      _urgentTaskProvider.setServices(_apiService, _syncService);
+
+    } catch (e) {
+      // Mesmo com erro, abre o app (não trava)
+      debugPrint('Bootstrap error: $e');
+    }
+
+    if (mounted) setState(() => _pronto = true);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_pronto) {
+      // Splash Flutter nativa — mesma cor do launch_background.xml
+      return const MaterialApp(
+        debugShowCheckedModeBanner: false,
+        home: _SplashView(),
+      );
+    }
+
+    return MultiProvider(
       providers: [
-        ChangeNotifierProvider.value(value: authService),
-        ChangeNotifierProvider.value(value: syncService),
-        ChangeNotifierProvider.value(value: agendaProvider),
-        ChangeNotifierProvider.value(value: financeProvider),
-        ChangeNotifierProvider.value(value: budgetProvider),
-        ChangeNotifierProvider.value(value: shoppingProvider),
-        ChangeNotifierProvider.value(value: urgentTaskProvider),
-        ChangeNotifierProvider.value(value: passwordProvider),
-        ChangeNotifierProvider.value(value: petProvider),
-        ChangeNotifierProvider.value(value: themeProvider),
-        ChangeNotifierProvider.value(value: notesProvider),
+        ChangeNotifierProvider.value(value: _authService),
+        ChangeNotifierProvider.value(value: _syncService),
+        ChangeNotifierProvider.value(value: _agendaProvider),
+        ChangeNotifierProvider.value(value: _financeProvider),
+        ChangeNotifierProvider.value(value: _budgetProvider),
+        ChangeNotifierProvider.value(value: _shoppingProvider),
+        ChangeNotifierProvider.value(value: _urgentTaskProvider),
+        ChangeNotifierProvider.value(value: _passwordProvider),
+        ChangeNotifierProvider.value(value: _petProvider),
+        ChangeNotifierProvider.value(value: _themeProvider),
+        ChangeNotifierProvider.value(value: _notesProvider),
       ],
       child: const TudoNaMaoApp(),
-    ),
-  );
+    );
+  }
+}
+
+// ── Splash view Flutter (substitui a nativa após o Flutter engine subir) ──────
+class _SplashView extends StatelessWidget {
+  const _SplashView();
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      backgroundColor: Color(0xFF0B1F3A),
+      body: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Logo igual à splash nativa
+            Image(
+              image: const AssetImage('assets/logo/logo_192.png'),
+              width: 110,
+              height: 110,
+              errorBuilder: _logoFallback,
+            ),
+            SizedBox(height: 32),
+            SizedBox(
+              width: 28,
+              height: 28,
+              child: CircularProgressIndicator(
+                strokeWidth: 2.5,
+                valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFf97316)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  static Widget _logoFallback(BuildContext ctx, Object err, StackTrace? st) {
+    return Container(
+      width: 110, height: 110,
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFFf97316), Color(0xFFea580c)],
+          begin: Alignment.topLeft, end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(28),
+      ),
+      child: const Icon(Icons.handshake_rounded, color: Colors.white, size: 56),
+    );
+  }
 }
 
 // ── App root — decide Login ou MainShell ──────────────────────────────────────
@@ -164,7 +273,6 @@ class _MainShellState extends State<MainShell> {
   @override
   void initState() {
     super.initState();
-    // Registra callback de navegação global
     NavService.instance.register(_navigateTo);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await _requestPermissions();
@@ -173,38 +281,38 @@ class _MainShellState extends State<MainShell> {
       if (mounted) {
         try {
           await UpdateService.checarAtualizacao(context);
-        } catch (_) {
-          // Nunca deixa erro de update travar o app
-        }
+        } catch (_) {}
       }
     });
   }
 
   Future<void> _requestPermissions() async {
-    final micStatus = await Permission.microphone.status;
-    if (micStatus.isDenied) await Permission.microphone.request();
+    try {
+      final micStatus = await Permission.microphone.status;
+      if (micStatus.isDenied) await Permission.microphone.request();
+    } catch (_) {}
   }
 
   Future<void> _iniciarSync() async {
     if (_syncIniciado) return;
     _syncIniciado = true;
-    final sync    = context.read<SyncService>();
-    final agenda  = context.read<AgendaProvider>();
-    final finance = context.read<FinanceProvider>();
-    final shop    = context.read<ShoppingProvider>();
-    final urgent  = context.read<UrgentTaskProvider>();
+    try {
+      final sync    = context.read<SyncService>();
+      final agenda  = context.read<AgendaProvider>();
+      final finance = context.read<FinanceProvider>();
+      final shop    = context.read<ShoppingProvider>();
+      final urgent  = context.read<UrgentTaskProvider>();
 
-    if (sync.online) {
-      // Baixa dados do servidor em background
-      await Future.wait([
-        agenda.sincronizarDoServidor(),
-        finance.sincronizarDoServidor(),
-        shop.sincronizarDoServidor(),
-        urgent.sincronizarDoServidor(),
-      ]);
-      // Envia operações pendentes
-      await sync.sincronizar();
-    }
+      if (sync.online) {
+        await Future.wait([
+          agenda.sincronizarDoServidor(),
+          finance.sincronizarDoServidor(),
+          shop.sincronizarDoServidor(),
+          urgent.sincronizarDoServidor(),
+        ]);
+        await sync.sincronizar();
+      }
+    } catch (_) {}
   }
 
   void _navigateTo(int index) {
@@ -245,14 +353,12 @@ class _MainShellState extends State<MainShell> {
         children: _screens,
       ),
 
-      // ── FAB central — microfone ───────────────────────────────────────────
       floatingActionButton: Padding(
         padding: const EdgeInsets.only(bottom: 6),
         child: VoiceAssistantButton(onNavigate: _navigateTo),
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
 
-      // ── Barra inferior ────────────────────────────────────────────────────
       bottomNavigationBar: BottomAppBar(
         color: AppColors.primaryDark,
         shape: const CircularNotchedRectangle(),
@@ -264,7 +370,6 @@ class _MainShellState extends State<MainShell> {
             height: 62,
             child: Row(
               children: [
-                // ── 3 itens esquerda ─────────────────────────────────────
                 ..._navItems.sublist(0, 3).map((cfg) => Expanded(
                   child: _NavItem(
                     icon: cfg.icon, label: cfg.label,
@@ -272,11 +377,7 @@ class _MainShellState extends State<MainShell> {
                     onTap: () => _navigateTo(cfg.index),
                   ),
                 )),
-
-                // ── Espaço do FAB ─────────────────────────────────────────
                 const SizedBox(width: 68),
-
-                // ── 2 itens direita ───────────────────────────────────────
                 ..._navItems.sublist(3, 5).map((cfg) {
                   int? badge;
                   if (cfg.index == 4) {
@@ -296,8 +397,6 @@ class _MainShellState extends State<MainShell> {
                     ),
                   );
                 }),
-
-                // ── Botão "Mais" ──────────────────────────────────────────
                 Expanded(
                   child: _MoreButton(
                     currentIndex: _currentIndex,
@@ -365,7 +464,6 @@ class _MoreButton extends StatelessWidget {
                 Icon(Icons.apps_rounded,
                     color: _isActive ? AppColors.accentOrange : const Color(0xFFBDD3EA),
                     size: _isActive ? 24 : 22),
-                // Badge vermelho de urgentes (prioridade máxima, some quando aba Urgente está aberta)
                 if (urgentesNaoVistos > 0 && currentIndex != 4)
                   Positioned(
                     right: -6, top: -4,
@@ -380,7 +478,6 @@ class _MoreButton extends StatelessWidget {
                           textAlign: TextAlign.center),
                     ),
                   )
-                // Badge laranja de sync (secundário, só aparece sem urgentes)
                 else if (pendentes > 0 && urgentesNaoVistos == 0)
                   Positioned(
                     right: -5, top: -4,
@@ -428,12 +525,11 @@ class _MoreButton extends StatelessWidget {
       elevation: 12,
       items: [
         _menuItem(10, Icons.sticky_note_2_rounded, 'Anotações',    const Color(0xFFFF7A00)),
-        _menuItem(5, Icons.description_rounded,   'Orçamentos',    const Color(0xFF3B82F6)),
-        _menuItem(6, Icons.lock_rounded,           'Cofre',         const Color(0xFFFF7A00)),
-        _menuItem(7, Icons.pets_rounded,           'MeuPet',        const Color(0xFFf97316)),
-        _menuItem(8, Icons.auto_awesome_rounded,   'Assistente IA', const Color(0xFF6366f1)),
-        _menuItem(9, Icons.settings_rounded,       'Configurações', const Color(0xFF64748b)),
-        // ── Separador + Logout ────────────────────────────────────────────
+        _menuItem(5, Icons.description_rounded,    'Orçamentos',   const Color(0xFF3B82F6)),
+        _menuItem(6, Icons.lock_rounded,            'Cofre',        const Color(0xFFFF7A00)),
+        _menuItem(7, Icons.pets_rounded,            'MeuPet',       const Color(0xFFf97316)),
+        _menuItem(8, Icons.auto_awesome_rounded,    'Assistente IA',const Color(0xFF6366f1)),
+        _menuItem(9, Icons.settings_rounded,        'Configurações',const Color(0xFF64748b)),
         const PopupMenuDivider(),
         PopupMenuItem<int>(
           value: -1,
@@ -471,7 +567,6 @@ class _MoreButton extends StatelessWidget {
     ).then((val) async {
       if (val == null) return;
       if (val == -1) {
-        // Logout
         final auth = context.read<AuthService>();
         final sync = context.read<SyncService>();
         await sync.limparFila();
