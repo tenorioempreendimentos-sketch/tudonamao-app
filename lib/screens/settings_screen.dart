@@ -614,9 +614,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void _abrirVincularWhatsApp(BuildContext context) {
     final ctrlTelefone = TextEditingController();
     String? codigoGerado;
+    String? numeroBot;
     bool carregando = false;
     final auth = context.read<AuthService>();
     final apiBase = 'https://tudonamao-site-production.up.railway.app';
+    const botNumero = '558299763155';
+    const botQrUrl  = 'https://wa.me/qr/I3V3TFXQRRDFI1';
 
     showModalBottomSheet(
       context: context,
@@ -657,7 +660,64 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 'Depois de vincular, você pode enviar mensagens como:\n"comprei 25,00 de almoço" e o app registra automaticamente!',
                 style: TextStyle(color: Color(0xFF94a3b8), fontSize: 13, height: 1.5),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 16),
+
+              // ── Card número do bot ──────────────────────────────────────
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF25d366).withValues(alpha: 0.08),
+                  border: Border.all(color: const Color(0xFF25d366).withValues(alpha: 0.25)),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 42, height: 42,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF25d366).withValues(alpha: 0.15),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.smart_toy_rounded, color: Color(0xFF25d366), size: 22),
+                    ),
+                    const SizedBox(width: 12),
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Número do Bot TudoNaMão',
+                              style: TextStyle(color: Colors.white54, fontSize: 11)),
+                          SizedBox(height: 2),
+                          Text('(82) 9976-3155',
+                              style: TextStyle(color: Colors.white, fontSize: 17,
+                                  fontWeight: FontWeight.w800, letterSpacing: 0.5)),
+                        ],
+                      ),
+                    ),
+                    GestureDetector(
+                      onTap: () => _abrirUrl(botQrUrl),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF25d366),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.open_in_new_rounded, color: Colors.white, size: 14),
+                            SizedBox(width: 4),
+                            Text('Abrir', style: TextStyle(color: Colors.white,
+                                fontSize: 13, fontWeight: FontWeight.w700)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
 
               if (codigoGerado == null) ...[
                 // Passo 1: digitar telefone
@@ -705,7 +765,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         );
                         final data = jsonDecode(resp.body);
                         if (data['success'] == true) {
-                          setModal(() { codigoGerado = data['codigo']; carregando = false; });
+                          setModal(() {
+                            codigoGerado = data['codigo'].toString();
+                            numeroBot    = data['telefone_bot']?.toString() ?? botNumero;
+                            carregando   = false;
+                          });
                         } else {
                           setModal(() => carregando = false);
                           if (ctx.mounted) {
@@ -754,17 +818,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     color: Colors.white.withValues(alpha: 0.05),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: const Column(
+                  child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
+                    children: const [
                       Text('Próximo passo:', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13)),
                       SizedBox(height: 8),
-                      Text('1. Abra o WhatsApp\n2. Envie o código acima para o número do bot\n3. Aguarde a confirmação\n\nApós confirmar, você pode registrar qualquer coisa diretamente pelo WhatsApp!',
+                      Text('1. Toque em "Enviar código" abaixo\n2. O WhatsApp vai abrir com a mensagem pronta\n3. Só enviar e aguardar confirmação! ✅',
                           style: TextStyle(color: Color(0xFF94a3b8), fontSize: 13, height: 1.6)),
                     ],
                   ),
                 ),
                 const SizedBox(height: 16),
+                // Botão enviar código direto no WhatsApp
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF25d366),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    icon: const Icon(Icons.send_rounded, size: 18),
+                    label: const Text('Enviar código pelo WhatsApp',
+                        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+                    onPressed: () {
+                      final tel = numeroBot ?? botNumero;
+                      final msg = Uri.encodeComponent(
+                          'Meu código de verificação TudoNaMão: $codigoGerado');
+                      _abrirUrl('https://wa.me/$tel?text=$msg');
+                    },
+                  ),
+                ),
+                const SizedBox(height: 10),
                 SizedBox(
                   width: double.infinity,
                   child: OutlinedButton(
