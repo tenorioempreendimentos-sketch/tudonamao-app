@@ -1,22 +1,28 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:http/http.dart' as http;
 import '../services/groq_service.dart';
+import '../services/auth_service.dart';
 import '../providers/finance_provider.dart';
 import '../providers/urgent_task_provider.dart';
 import '../providers/agenda_provider.dart';
 import '../theme/app_theme.dart';
+
+const _kApiBase = 'https://tudonamao-site-production.up.railway.app';
 
 // ── Modelo de mensagem ────────────────────────────────────────────────────────
 
 class _Mensagem {
   final String texto;
   final bool isUser;
+  final bool isBot;
   final DateTime hora;
-  _Mensagem({required this.texto, required this.isUser})
+  _Mensagem({required this.texto, required this.isUser, this.isBot = false})
       : hora = DateTime.now();
 }
 
@@ -40,14 +46,11 @@ class _AiAssistantScreenState extends State<AiAssistantScreen>
   bool _enviando = false;
   bool _online = true;
 
-  // ── Hive: histórico persistente ─────────────────────────────────────────────
-  static const _kBoxName = 'ai_history';
-  static const _kMsgsKey = 'msgs';
-  static const _kHistKey = 'hist';
-  Box<dynamic>? _histBox;
+  // Modo: false = IA Groq (análises), true = Bot TudoNaMão (registros via servidor)
+  bool _modoBot = false;
 
-  // Sugestões rápidas
-  static const _sugestoes = [
+  // Sugestões rápidas — IA Groq
+  static const _sugestoesIA = [
     '💰 Como está meu saldo este mês?',
     '📊 Onde estou gastando mais?',
     '✅ Tenho tarefas urgentes?',
@@ -55,6 +58,26 @@ class _AiAssistantScreenState extends State<AiAssistantScreen>
     '💡 Dicas para economizar dinheiro',
     '📈 Como organizar minhas finanças?',
   ];
+
+  // Sugestões rápidas — Bot TudoNaMão
+  static const _sugestoesBot = [
+    '💸 gastei 50 de almoço',
+    '💰 recebi 3000 de salário',
+    '📅 reunião amanhã às 10h',
+    '🛒 comprar leite e ovos',
+    '⚡ pagar boleto até sexta',
+    '📝 aniversário da mamãe dia 20',
+    '💵 qual meu saldo?',
+    'ajuda',
+  ];
+
+  // ── Hive: histórico persistente ─────────────────────────────────────────────
+  static const _kBoxName = 'ai_history';
+  static const _kMsgsKey = 'msgs';
+  static const _kHistKey = 'hist';
+  Box<dynamic>? _histBox;
+
+
 
   @override
   void initState() {
@@ -105,6 +128,7 @@ class _AiAssistantScreenState extends State<AiAssistantScreen>
     final msgsData = _msgs.map((m) => {
       'texto':  m.texto,
       'isUser': m.isUser,
+      'isBot':  m.isBot,
     }).toList();
     final histData = _historico.map((h) => {
       'role':    h['role'],
@@ -182,6 +206,37 @@ class _AiAssistantScreenState extends State<AiAssistantScreen>
   // ── Envio de mensagem ─────────────────────────────────────────────────────
 
   Future<void> _enviar(String texto) async {
+    if (_modoBot) { await _enviarBot(texto); return; }
+    await _enviarIA(texto);
+  }
+
+  // Envia para /api/bot/chat (servidor TudoNaMão)
+  Future<void> _enviarBot(String texto) async {
+    final msg = texto.trim();
+    if (msg.isEmpty || _enviando) return;
+    _ctrl.clear(); _focus.unfocus();
+    setState(() { _msgs.add(_Mensagem(texto: msg, isUser: true)); _enviando = true; });
+    _scrollBottom();
+    try {
+      final auth  = context.read<AuthService>();
+      final token = auth.token;
+      if (token == null) throw Exception('Não autenticado');
+      final resp = await http.post(
+        Uri.parse('$_kApiBase/api/bot/chat'),
+        headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer $token'},
+        body: jsonEncode({'mensagem': msg}),
+      ).timeout(const Duration(seconds: 30));
+      final data     = jsonDecode(resp.body) as Map<String, dynamic>;
+      final resposta = (data['resposta'] as String?) ?? (data['success'] == true ? '✅ Registrado!' : '❌ Erro.');
+      if (mounted) setState(() { _msgs.add(_Mensagem(texto: resposta, isUser: false, isBot: true)); _enviando = false; });
+      _scrollBottom();
+    } catch (e) {
+      if (mounted) setState(() { _msgs.add(_Mensagem(texto: '❌ Não consegui conectar. Verifique sua internet.', isUser: false, isBot: true)); _enviando = false; });
+      _scrollBottom();
+    }
+  }
+
+  Future<void> _enviarIA(String texto) async {
     final msg = texto.trim();
     if (msg.isEmpty || _enviando) return;
 
@@ -347,87 +402,101 @@ class _AiAssistantScreenState extends State<AiAssistantScreen>
   }
 
   Widget _buildHeader() {
+    final corAtivo = _modoBot ? const Color(0xFF25D366) : const Color(0xFF6366f1);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
       decoration: BoxDecoration(
         color: AppColors.primaryDark,
         border: Border(
-          bottom: BorderSide(
-            color: Colors.white.withValues(alpha: 0.08),
-            width: 1,
-          ),
+          bottom: BorderSide(color: Colors.white.withValues(alpha: 0.08), width: 1),
         ),
       ),
-      child: Row(
+      child: Column(
         children: [
-          // Avatar IA
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [Color(0xFF6366f1), Color(0xFF8b5cf6)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(14),
-              boxShadow: [
-                BoxShadow(
-                  color: const Color(0xFF6366f1).withValues(alpha: 0.4),
-                  blurRadius: 12,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: const Icon(Icons.auto_awesome_rounded,
-                color: Colors.white, size: 22),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Assistente IA',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
+          Row(
+            children: [
+              Container(
+                width: 40, height: 40,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: _modoBot
+                        ? [const Color(0xFF128C7E), const Color(0xFF25D366)]
+                        : [const Color(0xFF6366f1), const Color(0xFF8b5cf6)],
+                    begin: Alignment.topLeft, end: Alignment.bottomRight,
                   ),
+                  borderRadius: BorderRadius.circular(13),
+                  boxShadow: [BoxShadow(color: corAtivo.withValues(alpha: 0.4), blurRadius: 10, offset: const Offset(0, 3))],
                 ),
-                Row(
+                child: Icon(_modoBot ? Icons.smart_toy_rounded : Icons.auto_awesome_rounded, color: Colors.white, size: 20),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 400),
-                      width: 7,
-                      height: 7,
-                      decoration: BoxDecoration(
-                        color: _online ? const Color(0xFF10b981) : Colors.redAccent,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    const SizedBox(width: 5),
                     Text(
-                      _online ? 'Online · Llama 3 via Groq' : 'Sem conexão · Verifique a internet',
-                      style: TextStyle(
-                        color: _online ? const Color(0xFF64748b) : Colors.redAccent,
-                        fontSize: 11,
-                      ),
+                      _modoBot ? 'Bot TudoNaMão' : 'Assistente IA',
+                      style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700),
                     ),
+                    Row(children: [
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 400),
+                        width: 6, height: 6,
+                        decoration: BoxDecoration(
+                          color: _online ? const Color(0xFF10b981) : Colors.redAccent,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        _modoBot
+                            ? (_online ? 'Registra direto no app' : 'Sem conexão')
+                            : (_online ? 'Online · Llama 3 via Groq' : 'Sem conexão'),
+                        style: TextStyle(color: _online ? const Color(0xFF64748b) : Colors.redAccent, fontSize: 10),
+                      ),
+                    ]),
                   ],
                 ),
-              ],
-            ),
+              ),
+              if (_msgs.length > 1)
+                IconButton(
+                  onPressed: _limparConversa,
+                  icon: const Icon(Icons.refresh_rounded, color: Color(0xFF64748b), size: 20),
+                  tooltip: 'Nova conversa',
+                ),
+            ],
           ),
-          // Botão limpar conversa
-          if (_msgs.length > 1)
-            IconButton(
-              onPressed: _limparConversa,
-              icon: const Icon(Icons.refresh_rounded,
-                  color: Color(0xFF64748b), size: 20),
-              tooltip: 'Nova conversa',
-            ),
+          const SizedBox(height: 10),
+          // Toggle IA / Bot
+          Container(
+            margin: const EdgeInsets.only(bottom: 10),
+            padding: const EdgeInsets.all(3),
+            decoration: BoxDecoration(color: const Color(0xFF0F2240), borderRadius: BorderRadius.circular(12)),
+            child: Row(children: [
+              _buildModeTab(label: '✨ IA (análises)', ativo: !_modoBot, cor: const Color(0xFF6366f1), onTap: () => setState(() => _modoBot = false)),
+              _buildModeTab(label: '🤖 Bot (registros)', ativo: _modoBot, cor: const Color(0xFF25D366), onTap: () => setState(() => _modoBot = true)),
+            ]),
+          ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildModeTab({required String label, required bool ativo, required Color cor, required VoidCallback onTap}) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          decoration: BoxDecoration(
+            color: ativo ? cor.withValues(alpha: 0.18) : Colors.transparent,
+            borderRadius: BorderRadius.circular(9),
+            border: ativo ? Border.all(color: cor.withValues(alpha: 0.4)) : null,
+          ),
+          child: Text(label, textAlign: TextAlign.center,
+            style: TextStyle(color: ativo ? cor : const Color(0xFF64748b), fontSize: 12, fontWeight: ativo ? FontWeight.w700 : FontWeight.w500)),
+        ),
       ),
     );
   }
@@ -437,8 +506,11 @@ class _AiAssistantScreenState extends State<AiAssistantScreen>
       _msgs.clear();
       _historico.clear();
       _msgs.add(_Mensagem(
-        texto: 'Conversa reiniciada! 🔄 Como posso te ajudar?',
+        texto: _modoBot
+            ? 'Pronto! 🤖 Me diga o que registrar:\n\n_"gastei 30 de almoço"_\n_"reunião amanhã às 15h"_\n_"comprar leite"_\n\nOu escreva *ajuda* para ver todos os comandos.'
+            : 'Conversa reiniciada! 🔄 Como posso te ajudar?',
         isUser: false,
+        isBot: _modoBot,
       ));
     });
     _salvarHistorico();
@@ -623,33 +695,36 @@ class _AiAssistantScreenState extends State<AiAssistantScreen>
   }
 
   Widget _buildSugestoes() {
+    final lista = _modoBot ? _sugestoesBot : _sugestoesIA;
+    final corBorda = _modoBot
+        ? const Color(0xFF25D366).withValues(alpha: 0.35)
+        : const Color(0xFF1E63B7).withValues(alpha: 0.4);
+
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Padding(
-            padding: EdgeInsets.only(bottom: 8),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
             child: Text(
-              'Sugestões',
-              style: TextStyle(color: Color(0xFF64748b), fontSize: 12),
+              _modoBot ? 'Exemplos de comandos' : 'Sugestões',
+              style: const TextStyle(color: Color(0xFF64748b), fontSize: 12),
             ),
           ),
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: _sugestoes
+            children: lista
                 .map((s) => GestureDetector(
                       onTap: () => _enviar(s),
                       child: Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 8),
+                            horizontal: 12, vertical: 7),
                         decoration: BoxDecoration(
                           color: const Color(0xFF0F2240),
                           borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                            color: const Color(0xFF1E63B7).withValues(alpha: 0.4),
-                          ),
+                          border: Border.all(color: corBorda),
                         ),
                         child: Text(
                           s,
