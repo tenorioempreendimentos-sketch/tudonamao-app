@@ -28,7 +28,7 @@ class UpdateService {
     try {
       final response = await http
           .get(Uri.parse(_versionUrl))
-          .timeout(const Duration(seconds: 8));
+          .timeout(const Duration(seconds: 6));
 
       if (response.statusCode != 200) {
         if (!silencioso && context.mounted) {
@@ -360,11 +360,14 @@ class UpdateService {
     required String urlDownload,
     required List<String> novidades,
   }) async {
+    // Segurança: nunca bloqueia o app indefinidamente.
+    // Mesmo que obrigatorio=true, o usuário pode fechar tocando fora
+    // (o app pode não funcionar 100% sem atualizar, mas não trava).
     await showDialog(
       context: context,
-      barrierDismissible: !obrigatorio,
+      barrierDismissible: true,
       builder: (ctx) => PopScope(
-        canPop: !obrigatorio,
+        canPop: true,
         child: AlertDialog(
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),

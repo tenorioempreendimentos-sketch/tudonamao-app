@@ -170,7 +170,13 @@ class _MainShellState extends State<MainShell> {
       await _requestPermissions();
       await _iniciarSync();
       await Future.delayed(const Duration(seconds: 2));
-      if (mounted) await UpdateService.checarAtualizacao(context);
+      if (mounted) {
+        try {
+          await UpdateService.checarAtualizacao(context);
+        } catch (_) {
+          // Nunca deixa erro de update travar o app
+        }
+      }
     });
   }
 
